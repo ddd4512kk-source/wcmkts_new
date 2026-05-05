@@ -151,7 +151,7 @@ def main():
     st.dataframe(
         display_df,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         height=600,
         column_config=get_builder_helper_column_config(language_code=language_code),
     )
