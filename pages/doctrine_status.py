@@ -123,6 +123,7 @@ def _rebuild_selections():
     """
     checked_type_ids = set()
     for key, value in st.session_state.items():
+        key =str(key)
         if key.startswith("mod_"):
             if value is not True:
                 continue
@@ -162,63 +163,45 @@ def _status_text_color(status: StockStatus) -> str:
     }[status]
 
 
-def _inject_compact_doctrine_styles() -> None:
-    """Reduce the vertical footprint of doctrine row controls."""
-    st.markdown(
-        """
-        <style>
-        section[data-testid="stMain"] div[data-testid="stButton"] {
-            width: 100%;
-            max-width: 100%;
-        }
-
-        section[data-testid="stMain"] div[data-testid="stButton"] button[kind="secondary"],
-        section[data-testid="stMain"] div[data-testid="stButton"] button[kind="secondary"] p {
-            font-size: 0.78rem !important;
-            line-height: 1 !important;
-            margin: 0 !important;
-        }
-
-        section[data-testid="stMain"] div[data-testid="stButton"] button[kind="secondary"] {
-            width: 100% !important;
-            max-width: 100%;
-            height: 1.75rem !important;
-            min-height: 1.75rem !important;
-            padding: 0 0.45rem !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            border-radius: 0.45rem !important;
-        }
-
-        section[data-testid="stMain"] div[class*="st-key-toggle_fit_details_"],
-        section[data-testid="stMain"] div[class*="st-key-toggle_low_stock_"] {
-            margin: 0 !important;
-            padding: 0 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _render_low_stock_modules_button(
+def _render_actions_menu(
+    service,
     fit_id: int,
     language_code: str,
-) -> bool:
-    """Render a low-stock toggle button and return whether modules are visible."""
-    visible_key = f"low_stock_visible_{fit_id}"
+) -> tuple[bool, bool]:
+    """Render the per-row actions menu and return (fit_details_visible, low_stock_visible)."""
+    fit_details_visible_key = f"fit_details_visible_{fit_id}"
+    low_stock_visible_key = f"low_stock_visible_{fit_id}"
+    fit_data_key = f"tab2_data_{fit_id}"
 
-    if st.button(
-        translate_text(language_code, "doctrine_status.low_stock_modules"),
-        key=f"toggle_low_stock_{fit_id}",
+    fit_details_label = translate_text(language_code, "doctrine_status.show_fit_details")
+    low_stock_label = translate_text(language_code, "doctrine_status.low_stock_modules")
+
+    selection = st.menu_button(
+        "Details",
+        options=[fit_details_label, low_stock_label],
+        key=f"actions_menu_{fit_id}",
         type="secondary",
-        width="stretch",
-    ):
-        st.session_state[visible_key] = not st.session_state.get(visible_key, False)
-        st.rerun()
+        help="toggle fit, module stock details"
+    )
 
-    return bool(st.session_state.get(visible_key, False))
+    if selection == fit_details_label:
+        if st.session_state.get(fit_details_visible_key, False):
+            st.session_state[fit_details_visible_key] = False
+        else:
+            if fit_data_key not in st.session_state:
+                st.session_state[fit_data_key] = service.repository.get_fit_by_id(
+                    fit_id=fit_id
+                )
+            st.session_state[fit_details_visible_key] = True
+    elif selection == low_stock_label:
+        st.session_state[low_stock_visible_key] = not st.session_state.get(
+            low_stock_visible_key, False
+        )
+
+    return (
+        bool(st.session_state.get(fit_details_visible_key, False)),
+        bool(st.session_state.get(low_stock_visible_key, False)),
+    )
 
 
 def _render_low_stock_modules_panel(
@@ -320,35 +303,6 @@ def _render_low_stock_modules_panel(
                         )
 
 
-def _render_fit_details_button(
-    service,
-    fit_id: int,
-    language_code: str,
-) -> bool:
-    """Render a fit-details toggle button and return whether details are visible."""
-    data_key = f"tab2_data_{fit_id}"
-    visible_key = f"fit_details_visible_{fit_id}"
-
-    if st.button(
-        translate_text(language_code, "doctrine_status.show_fit_details"),
-        key=f"toggle_fit_details_{fit_id}",
-        type="secondary",
-        width="stretch",
-    ):
-        is_visible = st.session_state.get(visible_key, False)
-        if is_visible:
-            st.session_state[visible_key] = False
-        else:
-            if data_key not in st.session_state:
-                st.session_state[data_key] = service.repository.get_fit_by_id(
-                    fit_id=fit_id
-                )
-            st.session_state[visible_key] = True
-        st.rerun()
-
-    return bool(st.session_state.get(visible_key, False))
-
-
 def _render_fit_details_table(
     fit_id: int,
     sde_repo,
@@ -391,7 +345,6 @@ def main():
     language_code = get_active_language()
     market = render_market_selector()
     sde_repo = get_sde_repository()
-    _inject_compact_doctrine_styles()
 
     # Read deep-link query param from dashboard
     qp_ship_id = None
@@ -614,7 +567,7 @@ def main():
                 f"title='{translate_text(language_code, 'doctrine_status.ship_group_help')}' "
                 "style='margin: 0.2rem 0 0.1rem 0;'>"
                 f"<div style='font-size: 1rem; font-weight: 600; color: #6b7280; line-height: 1.05;'>{group_name}</div>"
-                "<div style='height: 1px; background: rgba(245, 158, 11, 0.55); margin-top: 0.18rem;'></div>"
+                    "<div style='height: 1px; background: rgba(245, 158, 11, 0.55); margin-top: 0.18rem; margin-bottom: 0.12rem;'></div>"
                 "</div>"
             ),
             unsafe_allow_html=True,
@@ -643,7 +596,8 @@ def main():
             fit_details_visible = False
             low_stock_visible = False
 
-            row_cols = st.columns([0.8, 5.45, 1.85], gap="small")
+            row_cols = st.columns([0.8, 3.45,2.00, 1.85], gap="small", vertical_alignment="center")
+            #row_cols1,row_cols2,row_cols3,row_cols4 = st.columns([0.1,0.4,0.4,0.1])
 
             with row_cols[0]:
                 left_cols = st.columns([0.36, 0.64], gap="small")
@@ -682,7 +636,7 @@ def main():
             with row_cols[1]:
                 st.markdown(
                     (
-                        "<div style='font-size: 1.11rem; line-height: 1.12; margin: 0; padding: 0; "
+                        "<div style='font-size: 1.11rem; line-height: 1.2; margin: 0; padding: 0; "
                         "white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'>"
                         f"<strong>{translate_text(language_code, 'doctrine_status.fit_id_label', fit_id=fit_id)}</strong> "
                         f"&nbsp;&nbsp;{translate_text(language_code, 'doctrine_status.fit_name_label', fit_name=fit_name)}"
@@ -703,24 +657,18 @@ def main():
                         f"{_status_text_color(stock_status)}; font-weight: 600;'>"
                         f"{stock_status.display_name}</span>"
                         "</div>"
-                        f"{render_progress_bar_html(target_pct, height=10).replace('margin-top: 5px;', 'margin-top: 0.18rem;')}"
-                    ),
+                                           ),
                     unsafe_allow_html=True,
                 )
-
             with row_cols[2]:
-                action_cols = st.columns(2, gap="small")
-                with action_cols[0]:
-                    fit_details_visible = _render_fit_details_button(
-                        service=service,
-                        fit_id=fit_id,
-                        language_code=language_code,
-                    )
-                with action_cols[1]:
-                    low_stock_visible = _render_low_stock_modules_button(
-                        fit_id=fit_id,
-                        language_code=language_code,
-                    )
+                st.markdown(render_progress_bar_html(target_pct, height=30), unsafe_allow_html=True)
+
+            with row_cols[3]:
+                fit_details_visible, low_stock_visible = _render_actions_menu(
+                    service=service,
+                    fit_id=fit_id,
+                    language_code=language_code,
+                )
 
             if fit_details_visible:
                 _render_fit_details_table(
@@ -780,7 +728,7 @@ def main():
         # Clear checkbox states so they reinitialize
         keys_to_clear = [
             k for k in st.session_state.keys()
-            if k.startswith("ship_") or k.startswith("mod_")
+            if str(k).startswith("ship_") or str(k).startswith("mod_")
         ]
         for k in keys_to_clear:
             del st.session_state[k]
@@ -794,7 +742,7 @@ def main():
         st.session_state.export_data_rendered = False
         keys_to_clear = [
             k for k in st.session_state.keys()
-            if k.startswith("ship_") or k.startswith("mod_")
+            if str(k).startswith("ship_") or str(k).startswith("mod_")
         ]
         for k in keys_to_clear:
             del st.session_state[k]
@@ -826,9 +774,8 @@ def main():
             render_export_data()
             st.session_state.export_data_rendered = True
             st.rerun()
-
         # Show rendered market data and export options
-        if ss_get("export_data_rendered", False):
+        if ss_get("export_data_rendered"):
             st.sidebar.markdown("---")
             st.sidebar.subheader(translate_text(language_code, "doctrine_status.market_data"))
 
