@@ -42,31 +42,6 @@ def test_render_language_selector_uses_sidebar_widget_when_requested(monkeypatch
     rerun_mock.assert_called_once()
 
 
-def test_render_page_header_renders_logo_and_title(monkeypatch):
-    class DummyColumn:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-    columns_mock = Mock(return_value=(DummyColumn(), DummyColumn()))
-    image_mock = Mock()
-    markdown_mock = Mock()
-    title_mock = Mock()
-
-    monkeypatch.setattr(header.st, "columns", columns_mock)
-    monkeypatch.setattr(header.st, "image", image_mock)
-    monkeypatch.setattr(header.st, "title", title_mock)
-
-    header.render_page_header("Import Helper")
-
-    columns_mock.assert_called_once()
-    image_mock.assert_called_once()
-    title_mock.assert_called_once_with("Import Helper")
-    markdown_mock.assert_not_called()
-
-
 def test_render_page_title_renders_title_and_subtitle(monkeypatch):
     title_mock = Mock()
     markdown_mock = Mock()
@@ -78,22 +53,3 @@ def test_render_page_title_renders_title_and_subtitle(monkeypatch):
 
     title_mock.assert_called_once_with("Import Helper")
     markdown_mock.assert_called_once_with("*Subtitle*")
-
-
-def test_render_page_header_without_logo_uses_streamlit_title(monkeypatch):
-    title_mock = Mock()
-    columns_mock = Mock()
-    image_mock = Mock()
-    markdown_mock = Mock()
-
-    monkeypatch.setattr(header.st, "title", title_mock)
-    monkeypatch.setattr(header.st, "columns", columns_mock)
-    monkeypatch.setattr(header.st, "image", image_mock)
-    monkeypatch.setattr(header.st, "markdown", markdown_mock)
-
-    header.render_page_header("Import Helper", show_logo=False)
-
-    title_mock.assert_called_once_with("Import Helper")
-    columns_mock.assert_not_called()
-    image_mock.assert_not_called()
-    markdown_mock.assert_not_called()

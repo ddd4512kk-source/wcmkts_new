@@ -191,9 +191,14 @@ class TestMarketRepositoryCachedFunctions:
 
     @patch("repositories.market_repo.BaseRepository")
     @patch("repositories.market_repo.DatabaseConfig")
-    def test_get_builder_cost_catalog_returns_empty_df_when_table_missing(
+    def test_get_builder_cost_catalog_propagates_db_errors(
         self, mock_db_cls, mock_base_repo_cls
     ):
+        """When the underlying read fails (e.g. table missing on both local and
+        remote), the impl must let the exception propagate. BaseRepository.read_df
+        handles remote fallback for "no such table"; if it still raises, callers
+        (pages) surface the failure rather than swallowing it as empty data.
+        """
         mock_repo = Mock()
         mock_repo.read_df.side_effect = Exception("no such table: builder_costs")
         mock_base_repo_cls.return_value = mock_repo
@@ -201,22 +206,8 @@ class TestMarketRepositoryCachedFunctions:
 
         from repositories.market_repo import _get_builder_cost_catalog_impl
 
-        result = _get_builder_cost_catalog_impl()
-
-        assert result.empty
-        assert list(result.columns) == [
-            "type_id",
-            "type_name",
-            "group_id",
-            "group_name",
-            "category_id",
-            "category_name",
-            "total_cost_per_unit",
-            "time_per_unit",
-            "me",
-            "runs",
-            "fetched_at",
-        ]
+        with pytest.raises(Exception, match="no such table: builder_costs"):
+            _get_builder_cost_catalog_impl()
 
 
 class TestMarketRepositoryMalformedRecovery:

@@ -8,7 +8,6 @@ No Streamlit imports - pure business logic.
 from typing import Optional
 
 import pandas as pd
-from sqlalchemy import bindparam, text
 
 from logging_config import setup_logging
 from services.type_name_localization import get_localized_name_map
@@ -96,8 +95,9 @@ def _build_numeric_map(
 class BuilderHelperService:
     """Aggregates stored build cost, market price, and Jita price data."""
 
-    def __init__(self, market_repo, sde_repo=None):
+    def __init__(self, market_repo, price_service, sde_repo=None):
         self._market_repo = market_repo
+        self._price_service = price_service
         self._sde_repo = sde_repo
 
     def get_builder_data(self, language_code: str = "en") -> pd.DataFrame:
@@ -107,7 +107,6 @@ class BuilderHelperService:
             logger.warning("No builder costs available in the local catalog")
             return _empty_builder_frame()
 
-        builder_df = builder_df.drop_duplicates(subset=["type_id"], keep="first")
         type_ids = [
             type_id
             for type_id in (_to_int(value) for value in builder_df["type_id"].tolist())
@@ -137,9 +136,6 @@ class BuilderHelperService:
 
             jita_sell_price = jita_prices_map.get(type_id)
             market_sell_price = local_prices.get(type_id)
-            if market_sell_price is None and jita_sell_price is not None:
-                market_sell_price = jita_sell_price * 1.4
-
             build_cost = _to_float(row.get("total_cost_per_unit"))
             volume_30d = volume_index.get(type_id)
 
@@ -195,41 +191,22 @@ class BuilderHelperService:
         return df
 
     def _fetch_jita_prices(self, type_ids: list[int]) -> dict[int, float]:
-        """Read Jita sell prices from the local jita_prices table."""
+        """Resolve Jita sell prices via the shared PriceService.
+
+        Delegates to PriceService so this page uses the same provider chain
+        (local jita_prices cache → Fuzzwork → Janice) and shared in-memory
+        cache as the rest of the app. Items without a positive sell price
+        are omitted from the returned map.
+        """
         if not type_ids:
             return {}
 
-        db = getattr(self._market_repo, "db", None)
-        engine = getattr(db, "engine", None)
-        if engine is None:
-            logger.warning("jita_prices unavailable: market repository has no database engine")
-            return {}
-
-        query = text(
-            "SELECT type_id, sell_price FROM jita_prices WHERE type_id IN :type_ids"
-        ).bindparams(bindparam("type_ids", expanding=True))
-
-        try:
-            with engine.connect() as conn:
-                df = pd.read_sql_query(
-                    query,
-                    conn,
-                    params={"type_ids": [int(t) for t in type_ids]},
-                )
-        except Exception as exc:
-            logger.warning("jita_prices unavailable: %s", exc)
-            return {}
-
-        if df.empty or "type_id" not in df.columns or "sell_price" not in df.columns:
-            return {}
-
-        result: dict[int, float] = {}
-        for _, row in df.iterrows():
-            type_id = _to_int(row.get("type_id"))
-            sell_price = _to_float(row.get("sell_price"))
-            if type_id is not None and sell_price is not None:
-                result[type_id] = sell_price
-        return result
+        price_map = self._price_service.get_jita_price_data_map(type_ids)
+        return {
+            tid: result.sell_price
+            for tid, result in price_map.items()
+            if result.has_sell_price
+        }
 
 
 # =============================================================================
@@ -242,15 +219,18 @@ def get_builder_helper_service() -> BuilderHelperService:
     def _create() -> BuilderHelperService:
         from repositories.market_repo import get_market_repository
         from repositories.sde_repo import get_sde_repository
+        from services.price_service import get_price_service
 
         return BuilderHelperService(
             market_repo=get_market_repository(),
+            price_service=get_price_service(),
             sde_repo=get_sde_repository(),
         )
 
     try:
         from state import get_service
+        from state.market_state import get_active_market_key
 
-        return get_service("builder_helper_service", _create)
+        return get_service(f"builder_helper_service_{get_active_market_key()}", _create)
     except ImportError:
         return _create()

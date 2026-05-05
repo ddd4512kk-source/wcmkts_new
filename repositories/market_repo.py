@@ -197,8 +197,7 @@ def _get_sde_info_impl(type_ids: list) -> pd.DataFrame:
     query = text("""
         SELECT typeName as type_name, typeID as type_id, groupID as group_id,
                groupName as group_name, categoryID as category_id,
-               categoryName as category_name,
-               metaGroupID as meta_group_id, metaGroupName as meta_group_name
+               categoryName as category_name
         FROM sdetypes
         WHERE typeID IN :type_ids
     """).bindparams(bindparam("type_ids", expanding=True))
@@ -206,26 +205,12 @@ def _get_sde_info_impl(type_ids: list) -> pd.DataFrame:
         return pd.read_sql_query(query, conn, params={"type_ids": type_ids})
 
 
-def _empty_builder_cost_df() -> pd.DataFrame:
-    return pd.DataFrame(
-        columns=[
-            "type_id",
-            "type_name",
-            "group_id",
-            "group_name",
-            "category_id",
-            "category_name",
-            "total_cost_per_unit",
-            "time_per_unit",
-            "me",
-            "runs",
-            "fetched_at",
-        ]
-    )
-
-
 def _get_builder_cost_catalog_impl(db_alias: str = "wcmkt") -> pd.DataFrame:
-    """Fetch stored builder costs joined to market-side item metadata."""
+    """Fetch stored builder costs joined to market-side item metadata.
+
+    builder_costs.type_id is PRIMARY KEY in the synced schema, so a flat
+    SELECT is sufficient — no per-type dedup needed.
+    """
     repo = BaseRepository(DatabaseConfig(db_alias), logger)
     query = text(
         """
@@ -244,28 +229,10 @@ def _get_builder_cost_catalog_impl(db_alias: str = "wcmkt") -> pd.DataFrame:
         FROM builder_costs bc
         LEFT JOIN watchlist w ON w.type_id = bc.type_id
         LEFT JOIN marketstats ms ON ms.type_id = bc.type_id
-        WHERE COALESCE(bc.fetched_at, '') = (
-            SELECT MAX(COALESCE(inner_bc.fetched_at, ''))
-            FROM builder_costs inner_bc
-            WHERE inner_bc.type_id = bc.type_id
-        )
-          AND bc.rowid = (
-            SELECT MAX(inner_bc.rowid)
-            FROM builder_costs inner_bc
-            WHERE inner_bc.type_id = bc.type_id
-              AND COALESCE(inner_bc.fetched_at, '') = COALESCE(bc.fetched_at, '')
-        )
         ORDER BY category_name, group_name, type_name
         """
     )
-    try:
-        return repo.read_df(query).reset_index(drop=True)
-    except Exception as exc:
-        message = str(exc).lower()
-        if "no such table" in message and "builder_costs" in message:
-            logger.warning("builder_costs table missing in %s; returning empty catalog", db_alias)
-            return _empty_builder_cost_df()
-        raise
+    return repo.read_df(query).reset_index(drop=True)
 
 
 def _get_builder_cost_by_type_impl(type_id: int, db_alias: str = "wcmkt") -> pd.DataFrame:
@@ -289,18 +256,9 @@ def _get_builder_cost_by_type_impl(type_id: int, db_alias: str = "wcmkt") -> pd.
         LEFT JOIN watchlist w ON w.type_id = bc.type_id
         LEFT JOIN marketstats ms ON ms.type_id = bc.type_id
         WHERE bc.type_id = :type_id
-        ORDER BY bc.fetched_at DESC, bc.rowid DESC
-        LIMIT 1
         """
     )
-    try:
-        return repo.read_df(query, params={"type_id": type_id}).reset_index(drop=True)
-    except Exception as exc:
-        message = str(exc).lower()
-        if "no such table" in message and "builder_costs" in message:
-            logger.warning("builder_costs table missing in %s; returning empty row set", db_alias)
-            return _empty_builder_cost_df()
-        raise
+    return repo.read_df(query, params={"type_id": type_id}).reset_index(drop=True)
 
 
 # =============================================================================
