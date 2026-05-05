@@ -1,3 +1,4 @@
+from streamlit.elements.lib.layout_utils import Height
 import streamlit as st
 import pandas as pd
 from millify import millify
@@ -181,7 +182,8 @@ def _render_actions_menu(
         options=[fit_details_label, low_stock_label],
         key=f"actions_menu_{fit_id}",
         type="secondary",
-        help="toggle fit, module stock details"
+        help="toggle fit, module stock details",
+        
     )
 
     if selection == fit_details_label:
@@ -566,8 +568,8 @@ def main():
                 "<div "
                 f"title='{translate_text(language_code, 'doctrine_status.ship_group_help')}' "
                 "style='margin: 0.2rem 0 0.1rem 0;'>"
-                f"<div style='font-size: 1rem; font-weight: 600; color: #6b7280; line-height: 1.05;'>{group_name}</div>"
-                    "<div style='height: 1px; background: rgba(245, 158, 11, 0.55); margin-top: 0.18rem; margin-bottom: 0.12rem;'></div>"
+                f"<div style='font-size: 1.3rem; font-weight: 600; color: #6b7280; line-height: 1.15;'>{group_name}</div>"
+                    "<div style='height: 1.5px; background: rgba(245, 158, 11, 0.55); margin-top: 0.18rem; margin-bottom: 0.2rem;'></div>"
                 "</div>"
             ),
             unsafe_allow_html=True,
@@ -596,11 +598,12 @@ def main():
             fit_details_visible = False
             low_stock_visible = False
 
-            row_cols = st.columns([0.8, 3.45,2.00, 1.85], gap="small", vertical_alignment="center")
+            row_cols = st.columns([0.1, 0.4,0.3, 0.2], gap="small", vertical_alignment="center")
+
             #row_cols1,row_cols2,row_cols3,row_cols4 = st.columns([0.1,0.4,0.4,0.1])
 
             with row_cols[0]:
-                left_cols = st.columns([0.36, 0.64], gap="small")
+                left_cols = st.columns([0.25, 0.75], gap="small", vertical_alignment="center")
                 with left_cols[0]:
                     ship_cb_key = f"ship_{fit_id}_{ship_id}"
                     if ship_cb_key not in st.session_state:
@@ -620,55 +623,58 @@ def main():
                         )
 
                 with left_cols[1]:
-                    try:
-                        st.image(
-                            f"https://images.evetech.net/types/{ship_id}/render?size=64",
-                            width=42,
-                        )
-                    except Exception:
-                        st.caption(
-                            translate_text(
-                                language_code,
-                                "doctrine_status.image_not_available",
+                    with st.container(height='stretch', vertical_alignment='center', horizontal_alignment='left'):
+                        try:
+                            st.image(
+                                f"https://images.evetech.net/types/{ship_id}/icon",
+                                width=42
                             )
-                        )
+                        except Exception:
+                            st.caption(
+                                translate_text(
+                                    language_code,
+                                    "doctrine_status.image_not_available",
+                                )
+                            )
 
             with row_cols[1]:
                 st.markdown(
                     (
-                        "<div style='font-size: 1.11rem; line-height: 1.2; margin: 0; padding: 0; "
+                        "<div style='font-size: 1.15rem; line-height: 1.12rem; margin: 0; padding: 0.25rem; "
                         "white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'>"
-                        f"<strong>{translate_text(language_code, 'doctrine_status.fit_id_label', fit_id=fit_id)}</strong> "
+                        f"<span style='color: #3285a8;'>{translate_text(language_code, 'doctrine_status.fit_id_label', fit_id=fit_id)}</span>"
                         f"&nbsp;&nbsp;{translate_text(language_code, 'doctrine_status.fit_name_label', fit_name=fit_name)}"
                         "</div>"
-                        "<div style='font-size: 1.02rem; line-height: 1.14; margin: 0.08rem 0 0 0; padding: 0;'>"
-                        f"{translate_text(language_code, 'low_stock.column_fits')}: "
-                        f"<strong>{fits}</strong>"
+                            #"<div style='font-size: 1rem; line-height: 1; margin: 0.08rem 0 0 0; padding: 0.25rem;'>"
+                        f"<span style='color: #688c9c;'>{translate_text(language_code, 'low_stock.column_fits')}: </span>"
+                        f"{fits}"
                         f"&nbsp;&nbsp;|&nbsp;&nbsp;"
-                        f"{translate_text(language_code, 'doctrine_report.metric_total_hulls')}: "
-                        f"<strong>{hulls}</strong>"
+                            f"<span style='color: grey;'>{translate_text(language_code, 'doctrine_report.metric_total_hulls')}: </span>"
+                        f"{hulls}"
                         f"&nbsp;&nbsp;|&nbsp;&nbsp;"
-                        f"{translate_text(language_code, 'doctrine_report.target')}: "
-                        f"<strong>{target}</strong>"
+                            f"<span style='color: grey;'>{translate_text(language_code, 'doctrine_report.target')}: </span>"
+                        f"{target}"
                         f"&nbsp;&nbsp;|&nbsp;&nbsp;"
-                        f"{translate_text(language_code, 'doctrine_report.column_total_cost')}: "
-                        f"<strong>{fit_cost}</strong>"
-                        f"&nbsp;&nbsp;|&nbsp;&nbsp;<span style='color: "
-                        f"{_status_text_color(stock_status)}; font-weight: 600;'>"
-                        f"{stock_status.display_name}</span>"
+                            f"<span style='color: grey;'>{translate_text(language_code, 'doctrine_report.column_total_cost')}: </span>"
+                        f"{fit_cost}"
+                            #f"&nbsp;&nbsp;|&nbsp;&nbsp;<span style='color: "
+                            #f"{_status_text_color(stock_status)}; font-weight: 600;'>"
+                            #f"{stock_status.display_name}</span>"
                         "</div>"
                                            ),
                     unsafe_allow_html=True,
                 )
             with row_cols[2]:
-                st.markdown(render_progress_bar_html(target_pct, height=30), unsafe_allow_html=True)
+                st.markdown(render_progress_bar_html(target_pct, height=25), unsafe_allow_html=True)
 
             with row_cols[3]:
-                fit_details_visible, low_stock_visible = _render_actions_menu(
-                    service=service,
-                    fit_id=fit_id,
-                    language_code=language_code,
-                )
+                with st.container(width='stretch', vertical_alignment='center', horizontal_alignment='center'):
+                    fit_details_visible, low_stock_visible = _render_actions_menu(
+                        service=service,
+                        fit_id=fit_id,
+                        language_code=language_code,
+                    )
+
 
             if fit_details_visible:
                 _render_fit_details_table(
