@@ -139,7 +139,7 @@ class TestMarketRepositoryCachedFunctions:
 
     @patch("repositories.market_repo.BaseRepository")
     @patch("repositories.market_repo.DatabaseConfig")
-    def test_get_builder_cost_catalog_returns_joined_rows(self, mock_db_cls, mock_base_repo_cls):
+    def test_get_watchlist_returns_metadata(self, mock_db_cls, mock_base_repo_cls):
         expected = pd.DataFrame(
             [
                 {
@@ -149,11 +149,6 @@ class TestMarketRepositoryCachedFunctions:
                     "group_name": "Battlecruiser",
                     "category_id": 6,
                     "category_name": "Ship",
-                    "total_cost_per_unit": 12_500_000.0,
-                    "time_per_unit": 900.0,
-                    "me": 8,
-                    "runs": 3,
-                    "fetched_at": "2026-05-04 09:15:00",
                 }
             ]
         )
@@ -162,52 +157,13 @@ class TestMarketRepositoryCachedFunctions:
         mock_base_repo_cls.return_value = mock_repo
         mock_db_cls.return_value = Mock()
 
-        from repositories.market_repo import _get_builder_cost_catalog_impl
+        from repositories.market_repo import _get_watchlist_impl
 
-        result = _get_builder_cost_catalog_impl()
+        result = _get_watchlist_impl()
 
         assert result.equals(expected.reset_index(drop=True))
         query = mock_repo.read_df.call_args[0][0]
-        assert "FROM builder_costs bc" in str(query)
-        assert "watchlist" in str(query)
-
-    @patch("repositories.market_repo.BaseRepository")
-    @patch("repositories.market_repo.DatabaseConfig")
-    def test_get_builder_cost_by_type_filters_type_id(self, mock_db_cls, mock_base_repo_cls):
-        expected = pd.DataFrame(
-            [{"type_id": 24698, "type_name": "Drake", "total_cost_per_unit": 12_500_000.0}]
-        )
-        mock_repo = Mock()
-        mock_repo.read_df.return_value = expected
-        mock_base_repo_cls.return_value = mock_repo
-        mock_db_cls.return_value = Mock()
-
-        from repositories.market_repo import _get_builder_cost_by_type_impl
-
-        result = _get_builder_cost_by_type_impl(24698)
-
-        assert result.equals(expected.reset_index(drop=True))
-        assert mock_repo.read_df.call_args[1]["params"] == {"type_id": 24698}
-
-    @patch("repositories.market_repo.BaseRepository")
-    @patch("repositories.market_repo.DatabaseConfig")
-    def test_get_builder_cost_catalog_propagates_db_errors(
-        self, mock_db_cls, mock_base_repo_cls
-    ):
-        """When the underlying read fails (e.g. table missing on both local and
-        remote), the impl must let the exception propagate. BaseRepository.read_df
-        handles remote fallback for "no such table"; if it still raises, callers
-        (pages) surface the failure rather than swallowing it as empty data.
-        """
-        mock_repo = Mock()
-        mock_repo.read_df.side_effect = Exception("no such table: builder_costs")
-        mock_base_repo_cls.return_value = mock_repo
-        mock_db_cls.return_value = Mock()
-
-        from repositories.market_repo import _get_builder_cost_catalog_impl
-
-        with pytest.raises(Exception, match="no such table: builder_costs"):
-            _get_builder_cost_catalog_impl()
+        assert "FROM watchlist" in str(query)
 
 
 class TestMarketRepositoryMalformedRecovery:
@@ -346,8 +302,8 @@ class TestMarketRepositoryClass:
         assert result is expected
         mock_cached.assert_called_once_with((34,), mock_db.alias)
 
-    @patch("repositories.market_repo._get_builder_cost_catalog_cached")
-    def test_get_builder_cost_catalog_delegates(self, mock_cached):
+    @patch("repositories.market_repo._get_watchlist_cached")
+    def test_get_watchlist_delegates(self, mock_cached):
         expected = pd.DataFrame({"type_id": [24698], "type_name": ["Drake"]})
         mock_cached.return_value = expected
 
@@ -356,25 +312,10 @@ class TestMarketRepositoryClass:
         mock_db = Mock()
         repo = MarketRepository(mock_db)
 
-        result = repo.get_builder_cost_catalog()
+        result = repo.get_watchlist()
 
         assert result is expected
         mock_cached.assert_called_once_with(mock_db.alias)
-
-    @patch("repositories.market_repo._get_builder_cost_by_type_cached")
-    def test_get_builder_cost_by_type_delegates(self, mock_cached):
-        expected = pd.DataFrame({"type_id": [24698], "type_name": ["Drake"]})
-        mock_cached.return_value = expected
-
-        from repositories.market_repo import MarketRepository
-
-        mock_db = Mock()
-        repo = MarketRepository(mock_db)
-
-        result = repo.get_builder_cost_by_type(24698)
-
-        assert result is expected
-        mock_cached.assert_called_once_with(24698, mock_db.alias)
 
 
 class TestGetUpdateTime:

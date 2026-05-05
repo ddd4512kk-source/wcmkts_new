@@ -472,7 +472,7 @@ def get_builder_helper_column_config(language_code: str = "en") -> dict:
     return {
         "type_id": st.column_config.NumberColumn(
             "ID",
-            format="plain",
+            format="%d",
             width=50,
         ),
         "item_name": st.column_config.TextColumn(
@@ -506,6 +506,11 @@ def get_builder_helper_column_config(language_code: str = "en") -> dict:
             translate_text(language_code, "builder_helper.column_cap_utils"),
             help=translate_text(language_code, "builder_helper.column_cap_utils_help"),
             format="percent",
+        ),
+        "isk_per_hour": st.column_config.NumberColumn(
+            translate_text(language_code, "builder_helper.column_isk_per_hour"),
+            help=translate_text(language_code, "builder_helper.column_isk_per_hour_help"),
+            format="compact",
         ),
 
         "profit_30d": st.column_config.NumberColumn(

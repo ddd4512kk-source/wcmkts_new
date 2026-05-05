@@ -37,9 +37,26 @@ def main():
 
     service = get_builder_helper_service()
 
+    price_basis_options = {
+        "avg": translate_text(language_code, "builder_helper.price_basis_avg"),
+        "current": translate_text(language_code, "builder_helper.price_basis_current"),
+    }
+    price_basis = st.segmented_control(
+        translate_text(language_code, "builder_helper.price_basis_label"),
+        options=list(price_basis_options.keys()),
+        format_func=lambda key: price_basis_options[key],
+        default="avg",
+        key="builder_helper_price_basis",
+    )
+    if price_basis not in price_basis_options:
+        price_basis = "avg"
+
     with st.spinner(translate_text(language_code, "builder_helper.loading")):
         try:
-            df = service.get_builder_data(language_code=language_code)
+            df = service.get_builder_data(
+                language_code=language_code,
+                price_basis=price_basis,
+            )
         except Exception as exc:
             logger.error("Builder helper data load failed: %s", exc)
             st.error(translate_text(language_code, "builder_helper.error_loading_data"))
@@ -146,7 +163,6 @@ def main():
     display_df = filtered_df.copy()
     isk_cols = ["market_sell_price", "jita_sell_price", "build_cost"]
     display_df[isk_cols] = display_df[isk_cols].round().astype("Int64")
-    display_df["cap_utils"] = display_df["cap_utils"] * 100
 
     st.dataframe(
         display_df,

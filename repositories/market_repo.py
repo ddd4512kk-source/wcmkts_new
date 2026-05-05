@@ -205,60 +205,16 @@ def _get_sde_info_impl(type_ids: list) -> pd.DataFrame:
         return pd.read_sql_query(query, conn, params={"type_ids": type_ids})
 
 
-def _get_builder_cost_catalog_impl(db_alias: str = "wcmkt") -> pd.DataFrame:
-    """Fetch stored builder costs joined to market-side item metadata.
-
-    builder_costs.type_id is PRIMARY KEY in the synced schema, so a flat
-    SELECT is sufficient — no per-type dedup needed.
-    """
+def _get_watchlist_impl(db_alias: str = "wcmkt") -> pd.DataFrame:
+    """Fetch the full watchlist (type metadata) DataFrame."""
     repo = BaseRepository(DatabaseConfig(db_alias), logger)
     query = text(
         """
-        SELECT
-            bc.type_id AS type_id,
-            COALESCE(w.type_name, ms.type_name, CAST(bc.type_id AS TEXT)) AS type_name,
-            COALESCE(w.group_id, ms.group_id) AS group_id,
-            COALESCE(w.group_name, ms.group_name, 'Unknown') AS group_name,
-            COALESCE(w.category_id, ms.category_id) AS category_id,
-            COALESCE(w.category_name, ms.category_name, 'Unknown') AS category_name,
-            bc.total_cost_per_unit,
-            bc.time_per_unit,
-            bc.me,
-            bc.runs,
-            bc.fetched_at
-        FROM builder_costs bc
-        LEFT JOIN watchlist w ON w.type_id = bc.type_id
-        LEFT JOIN marketstats ms ON ms.type_id = bc.type_id
-        ORDER BY category_name, group_name, type_name
+        SELECT type_id, type_name, group_id, group_name, category_id, category_name
+        FROM watchlist
         """
     )
     return repo.read_df(query).reset_index(drop=True)
-
-
-def _get_builder_cost_by_type_impl(type_id: int, db_alias: str = "wcmkt") -> pd.DataFrame:
-    """Fetch a single stored builder-cost row with market-side item metadata."""
-    repo = BaseRepository(DatabaseConfig(db_alias), logger)
-    query = text(
-        """
-        SELECT
-            bc.type_id AS type_id,
-            COALESCE(w.type_name, ms.type_name, CAST(bc.type_id AS TEXT)) AS type_name,
-            COALESCE(w.group_id, ms.group_id) AS group_id,
-            COALESCE(w.group_name, ms.group_name, 'Unknown') AS group_name,
-            COALESCE(w.category_id, ms.category_id) AS category_id,
-            COALESCE(w.category_name, ms.category_name, 'Unknown') AS category_name,
-            bc.total_cost_per_unit,
-            bc.time_per_unit,
-            bc.me,
-            bc.runs,
-            bc.fetched_at
-        FROM builder_costs bc
-        LEFT JOIN watchlist w ON w.type_id = bc.type_id
-        LEFT JOIN marketstats ms ON ms.type_id = bc.type_id
-        WHERE bc.type_id = :type_id
-        """
-    )
-    return repo.read_df(query, params={"type_id": type_id}).reset_index(drop=True)
 
 
 # =============================================================================
@@ -325,14 +281,9 @@ def _get_sde_info_cached(type_ids: tuple) -> pd.DataFrame:
     return _get_sde_info_impl(list(type_ids))
 
 
-@st.cache_data(ttl=600)
-def _get_builder_cost_catalog_cached(db_alias: str = "wcmkt") -> pd.DataFrame:
-    return _get_builder_cost_catalog_impl(db_alias)
-
-
-@st.cache_data(ttl=600)
-def _get_builder_cost_by_type_cached(type_id: int, db_alias: str = "wcmkt") -> pd.DataFrame:
-    return _get_builder_cost_by_type_impl(type_id, db_alias)
+@st.cache_data(ttl=1800)
+def _get_watchlist_cached(db_alias: str = "wcmkt") -> pd.DataFrame:
+    return _get_watchlist_impl(db_alias)
 
 
 # =============================================================================
@@ -355,8 +306,7 @@ def invalidate_market_caches():
     _get_30day_volume_metrics_cached.clear()
     _get_market_type_ids_cached.clear()
     _get_local_price_cached.clear()
-    _get_builder_cost_catalog_cached.clear()
-    _get_builder_cost_by_type_cached.clear()
+    _get_watchlist_cached.clear()
     logger.info("Market caches invalidated")
 
 
@@ -483,13 +433,9 @@ class MarketRepository(BaseRepository):
             type_ids = self.get_market_type_ids()
         return _get_sde_info_cached(tuple(type_ids))
 
-    def get_builder_cost_catalog(self) -> pd.DataFrame:
-        """Get all stored builder-cost rows for the active market."""
-        return _get_builder_cost_catalog_cached(self.db.alias)
-
-    def get_builder_cost_by_type(self, type_id: int) -> pd.DataFrame:
-        """Get a stored builder-cost row for a specific type_id."""
-        return _get_builder_cost_by_type_cached(type_id, self.db.alias)
+    def get_watchlist(self) -> pd.DataFrame:
+        """Get the full watchlist with type metadata (cached, TTL=1800s)."""
+        return _get_watchlist_cached(self.db.alias)
 
     def get_update_time(self, local_update_status: Optional[dict] = None) -> Optional[str]:
         """Get formatted last update time string."""

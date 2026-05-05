@@ -28,6 +28,7 @@ BUILDER_HELPER_COLUMNS = [
     "jita_sell_price",
     "build_cost",
     "cap_utils",
+    "isk_per_hour",
     "profit_30d",
     "turnover_30d",
     "volume_30d",
@@ -88,6 +89,32 @@ def _build_numeric_map(
     return result
 
 
+_METADATA_FIELDS = ("type_name", "group_name", "category_name")
+
+
+def _build_metadata_index(
+    watchlist_df: pd.DataFrame,
+    stats_df: pd.DataFrame,
+) -> dict[int, dict[str, str]]:
+    """Build {type_id: {type_name, group_name, category_name}} preferring watchlist over marketstats."""
+    index: dict[int, dict[str, str]] = {}
+
+    # Stats first (lower priority).
+    for source in (stats_df, watchlist_df):
+        if source is None or source.empty or "type_id" not in source.columns:
+            continue
+        for _, row in source.iterrows():
+            type_id = _to_int(row.get("type_id"))
+            if type_id is None:
+                continue
+            entry = index.setdefault(type_id, {})
+            for field in _METADATA_FIELDS:
+                value = row.get(field) if field in source.columns else None
+                if value is not None and not pd.isna(value) and str(value):
+                    entry[field] = str(value)
+    return index
+
+
 # =============================================================================
 # Service
 # =============================================================================
@@ -95,14 +122,34 @@ def _build_numeric_map(
 class BuilderHelperService:
     """Aggregates stored build cost, market price, and Jita price data."""
 
-    def __init__(self, market_repo, price_service, sde_repo=None):
+    def __init__(self, market_repo, price_service, build_cost_repo, sde_repo=None):
         self._market_repo = market_repo
         self._price_service = price_service
+        self._build_cost_repo = build_cost_repo
         self._sde_repo = sde_repo
 
-    def get_builder_data(self, language_code: str = "en") -> pd.DataFrame:
-        """Fetch and combine all builder helper data into a single DataFrame."""
-        builder_df = self._market_repo.get_builder_cost_catalog()
+    def get_builder_data(
+        self,
+        language_code: str = "en",
+        price_basis: str = "avg",
+    ) -> pd.DataFrame:
+        """Fetch and combine all builder helper data into a single DataFrame.
+
+        Catalog rows come from buildcost.db.builder_costs (the backend's
+        synced source of truth). Type-name/group/category metadata is
+        enriched in pandas by joining against wcmkt watchlist (preferred)
+        with marketstats as a fallback.
+
+        price_basis selects which local-market price feeds the profitability
+        columns (cap_utils, isk_per_hour, profit_30d):
+          - "avg":     marketstats.avg_price (30-day mean) — default
+          - "current": marketstats.price (current best sell)
+        """
+        if price_basis not in ("avg", "current"):
+            logger.warning("Unknown price_basis %r, falling back to 'avg'", price_basis)
+            price_basis = "avg"
+
+        builder_df = self._build_cost_repo.get_builder_cost_catalog()
         if builder_df.empty or "type_id" not in builder_df.columns:
             logger.warning("No builder costs available in the local catalog")
             return _empty_builder_frame()
@@ -117,15 +164,17 @@ class BuilderHelperService:
             return _empty_builder_frame()
 
         jita_prices_map = self._fetch_jita_prices(type_ids)
-        local_prices = _build_numeric_map(
-            self._market_repo.get_all_stats(),
-            "type_id",
-            "price",
-        )
+        stats_df = self._market_repo.get_all_stats()
+        price_column = "avg_price" if price_basis == "avg" else "price"
+        local_prices = _build_numeric_map(stats_df, "type_id", price_column)
         volume_index = _build_numeric_map(
             self._market_repo.get_30day_volume_metrics(type_ids),
             "type_id",
             "volume_30d",
+        )
+        metadata_index = _build_metadata_index(
+            self._market_repo.get_watchlist(),
+            stats_df,
         )
 
         rows = []
@@ -137,15 +186,25 @@ class BuilderHelperService:
             jita_sell_price = jita_prices_map.get(type_id)
             market_sell_price = local_prices.get(type_id)
             build_cost = _to_float(row.get("total_cost_per_unit"))
+            time_per_unit = _to_float(row.get("time_per_unit"))
             volume_30d = volume_index.get(type_id)
 
             cap_utils = None
             if (
                 market_sell_price is not None
                 and build_cost is not None
-                and market_sell_price != 0
+                and build_cost != 0
             ):
-                cap_utils = (market_sell_price - build_cost) / market_sell_price
+                cap_utils = (market_sell_price - build_cost) / build_cost
+
+            isk_per_hour = None
+            if (
+                market_sell_price is not None
+                and build_cost is not None
+                and time_per_unit is not None
+                and time_per_unit > 0
+            ):
+                isk_per_hour = (market_sell_price - build_cost) / time_per_unit * 3600
 
             profit_30d = None
             if market_sell_price is not None and build_cost is not None and volume_30d is not None:
@@ -155,16 +214,18 @@ class BuilderHelperService:
             if jita_sell_price is not None and volume_30d is not None:
                 turnover_30d = jita_sell_price * volume_30d
 
+            metadata = metadata_index.get(type_id, {})
             rows.append(
                 {
                     "type_id": type_id,
-                    "item_name": _to_str(row.get("type_name"), f"Unknown ({type_id})"),
-                    "category": _to_str(row.get("category_name"), "—"),
-                    "group": _to_str(row.get("group_name"), "—"),
+                    "item_name": metadata.get("type_name") or f"Unknown ({type_id})",
+                    "category": metadata.get("category_name") or "—",
+                    "group": metadata.get("group_name") or "—",
                     "market_sell_price": market_sell_price,
                     "jita_sell_price": jita_sell_price,
                     "build_cost": build_cost,
                     "cap_utils": cap_utils,
+                    "isk_per_hour": isk_per_hour,
                     "profit_30d": profit_30d,
                     "turnover_30d": turnover_30d,
                     "volume_30d": volume_30d,
@@ -217,6 +278,7 @@ def get_builder_helper_service() -> BuilderHelperService:
     """Get or create a BuilderHelperService instance."""
 
     def _create() -> BuilderHelperService:
+        from repositories.build_cost_repo import get_build_cost_repository
         from repositories.market_repo import get_market_repository
         from repositories.sde_repo import get_sde_repository
         from services.price_service import get_price_service
@@ -224,6 +286,7 @@ def get_builder_helper_service() -> BuilderHelperService:
         return BuilderHelperService(
             market_repo=get_market_repository(),
             price_service=get_price_service(),
+            build_cost_repo=get_build_cost_repository(),
             sde_repo=get_sde_repository(),
         )
 
