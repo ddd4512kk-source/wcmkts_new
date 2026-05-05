@@ -656,13 +656,16 @@ def render_doctrine_ships_table(
             width="stretch",
             key=dataframe_key,
         )
-        # Detect which checkbox was clicked
+        # Look up the source row by its preserved pandas index, not by
+        # positional iloc — when the low-stock filter is active, edited_df
+        # row positions no longer align with result_df.
         for idx in range(len(edited_df)):
-            if edited_df.iloc[idx]["_mkt"]:
-                return int(result_df.iloc[idx]["type_id"]), "market_stats"
-            if edited_df.iloc[idx]["_doc"]:
-                logger.info(edited_df.iloc[idx])
-                return int(result_df.iloc[idx]["type_id"]), "doctrine_status"
+            row = edited_df.iloc[idx]
+            if not (row["_mkt"] or row["_doc"]):
+                continue
+            type_id = int(result_df.loc[edited_df.index[idx], "type_id"])
+            target = "market_stats" if row["_mkt"] else "doctrine_status"
+            return type_id, target
         return None, None
     else:
         table_df = drop_localized_backup_columns(result_df[display_cols[:9]].copy())
